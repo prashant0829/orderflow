@@ -1,0 +1,196 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *' # nightly: also runs the slow browser tests
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  backend:
+    name: Backend build and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore
+      - name: Build (warnings are errors)
+        run: dotnet build --no-restore -c Release
+      - name: Unit tests
+        run: >
+          dotnet test --no-build -c Release
+          --filter "FullyQualifiedName!~IntegrationTests"
+          --logger "trx;LogFileName=unit.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: TestResults
+          retention-days: 7
+
+  integration:
+    name: Integration tests (real SQL Server, Redis, RabbitMQ)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Pre-pull container images
+        run: |
+          docker pull mcr.microsoft.com/mssql/server:2022-latest &
+          docker pull redis:7-alpine &
+          docker build -t orderflow-rabbitmq-test:3.13 deploy/rabbitmq &
+          wait
+      - name: Integration tests
+        run: >
+          dotnet test tests/OrderFlow.IntegrationTests -c Release
+          --logger "trx;LogFileName=integration.trx"
+          --results-directory ./TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: TestResults
+          retention-days: 7
+
+  frontend:
+    name: Frontend typecheck, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  docker:
+    name: Docker image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gateway, project: src/Services/Gateway/OrderFlow.Gateway/OrderFlow.Gateway.csproj, dll: OrderFlow.Gateway.dll }
+          - { name: identity, project: src/Services/Identity/OrderFlow.Identity.Api/OrderFlow.Identity.Api.csproj, dll: OrderFlow.Identity.Api.dll }
+          - { name: orders, project: src/Services/Orders/OrderFlow.Orders.Api/OrderFlow.Orders.Api.csproj, dll: OrderFlow.Orders.Api.dll }
+          - { name: inventory, project: src/Services/Inventory/OrderFlow.Inventory.Api/OrderFlow.Inventory.Api.csproj, dll: OrderFlow.Inventory.Api.dll }
+          - { name: payments, project: src/Services/Payments/OrderFlow.Payments.Api/OrderFlow.Payments.Api.csproj, dll: OrderFlow.Payments.Api.dll }
+          - { name: notifications, project: src/Services/Notifications/OrderFlow.Notifications/OrderFlow.Notifications.csproj, dll: OrderFlow.Notifications.dll }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.dotnet
+          push: false
+          build-args: |
+            PROJECT=${{ matrix.project }}
+            ENTRY_DLL=${{ matrix.dll }}
+          tags: orderflow-${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  docker-web:
+    name: Docker image (web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: web
+          push: false
+          tags: orderflow-web:ci
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  browser-e2e:
+    name: Browser tests (Playwright against the full system)
+    # Slow (starts the whole system), so not on every pull request.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Start SQL Server, Redis, RabbitMQ, Seq
+        run: |
+          cp deploy/.env.example deploy/.env
+          docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+      - name: Build services
+        # dev-up.sh runs the Debug build (dotnet run --no-build), so build Debug here.
+        run: dotnet build
+      - name: Install web dependencies and the test browser
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start the system
+        env:
+          FakePaymentGateway__DeclineRate: '0'
+          FakePaymentGateway__TransientFailureRate: '0'
+          RateLimit__Auth__Limit: '1000'
+        run: scripts/dev-up.sh > .logs-devup.txt 2>&1 < /dev/null
+      - name: Playwright tests
+        working-directory: web
+        env:
+          CI: 'true'
+        run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+            .logs
+          retention-days: 7

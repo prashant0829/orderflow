@@ -1,0 +1,34 @@
+groups:
+  - name: orderflow
+    rules:
+      - alert: DeadLetterQueueNotEmpty
+        expr: sum by (queue) (rabbitmq_detailed_queue_messages{queue=~".*_error"}) > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Failed messages waiting in {{ $labels.queue }}"
+          description: "Inspect and replay them with GET/POST /api/v1/admin/dead-letters."
+
+      - alert: HighServerErrorRate
+        expr: |
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[2m]))
+            / sum by (service_name) (rate(http_server_request_duration_seconds_count[2m])) > 0.05
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service_name }} returns more than 5% server errors"
+
+      - alert: PaymentGatewayCircuitOpened
+        expr: increase(orderflow_payments_circuit_opened_total[5m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "The payment gateway circuit breaker opened"
+
+      - alert: OrdersFailingTooOften
+        expr: |
+          sum(increase(orderflow_orders_completed_total{outcome="failed"}[10m]))
+            / clamp_min(sum(increase(orderflow_orders_completed_total[10m])), 1) > 0.3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than 30% of finished orders failed in the last 10 minutes"

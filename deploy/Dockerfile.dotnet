@@ -1,0 +1,26 @@
+# One Dockerfile for every .NET service. Build from the repository root:
+#   docker build -f deploy/Dockerfile.dotnet \
+#     --build-arg PROJECT=src/Services/Orders/OrderFlow.Orders.Api/OrderFlow.Orders.Api.csproj \
+#     --build-arg ENTRY_DLL=OrderFlow.Orders.Api.dll -t orderflow-orders-api .
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+ARG PROJECT
+WORKDIR /src
+
+# Restore first so the package download is cached until a .csproj changes.
+COPY global.json Directory.Build.props .editorconfig ./
+COPY src ./src
+RUN dotnet restore "$PROJECT"
+RUN dotnet publish "$PROJECT" -c Release --no-restore -o /app/publish /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+ARG ENTRY_DLL
+WORKDIR /app
+COPY --from=build /app/publish .
+
+# Listen on 8080 inside the container, run as the image's non-root user.
+ENV ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_EnableDiagnostics=0 \
+    ENTRY_DLL=${ENTRY_DLL}
+EXPOSE 8080
+USER $APP_UID
+ENTRYPOINT ["sh", "-c", "exec dotnet \"$ENTRY_DLL\""]

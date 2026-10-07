@@ -1,0 +1,7 @@
+{
+  "name": "signalr-watch",
+  "private": true,
+  "type": "module",
+  "description": "CLI that prints live order status pushes from the Notifications SignalR hub",
+  "dependencies": { "@microsoft/signalr": "^8.0.7" }
+}

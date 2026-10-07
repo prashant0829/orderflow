@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------- .NET build output
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.rsuser
+*.dll.config
+artifacts/
+publish/
+
+# ---------------------------------------------------------------- test output and coverage
+TestResults/
+test-results/
+playwright-report/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+
+# ---------------------------------------------------------------- Node / web
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+npm-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------- secrets and local configuration
+# Real values live in these files. The committed templates are *.example (deploy/.env.example, web/.env.example).
+.env
+.env.*
+!.env.example
+*.local
+appsettings.Local.json
+appsettings.Production.json
+secrets.json
+
+# ---------------------------------------------------------------- logs and runtime files written by scripts
+.logs/
+*.log
+.logs-devup.txt
+
+# ---------------------------------------------------------------- editors and OS
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------- AI assistant local state
+.claude/
+CLAUDE.md
+
+# Working notes kept locally (not part of the published project): roadmap, decision log, idea list, interview prep.
+PLAN.md
+docs/DECISIONS.md
+docs/IDEAS.md
+docs/INTERVIEW.md

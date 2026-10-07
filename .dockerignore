@@ -1,0 +1,16 @@
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+.git
+.logs
+.claude
+tests
+tools
+docs
+deploy
+scripts
+web
+*.md

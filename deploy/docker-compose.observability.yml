@@ -1,0 +1,54 @@
+# Optional monitoring stack. Start together with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+# Configs are baked into small images (COPY) instead of bind-mounted, because Docker Desktop on macOS
+# cannot mount folders under ~/Documents without extra permissions. After editing a dashboard, re-run with --build.
+name: orderflow
+
+services:
+  otel-collector:
+    build:
+      context: ./observability
+      dockerfile: Dockerfile.collector
+    image: orderflow-otel-collector:local
+    command: ["--config=/etc/otel/config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC (services send here)
+      - "4318:4318"   # OTLP HTTP
+    depends_on: [jaeger]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686"]   # trace UI
+
+  prometheus:
+    build:
+      context: ./observability
+      dockerfile: Dockerfile.prometheus
+    image: orderflow-prometheus:local
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+    volumes: [promdata:/prometheus]
+    ports: ["9090:9090"]
+    depends_on: [otel-collector]
+
+  grafana:
+    build:
+      context: ./observability
+      dockerfile: Dockerfile.grafana
+    image: orderflow-grafana:local
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: orderflow
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/orderflow.json
+    volumes: [grafanadata:/var/lib/grafana]
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  promdata:
+  grafanadata:

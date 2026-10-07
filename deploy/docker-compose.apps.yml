@@ -1,0 +1,138 @@
+# The whole system in containers: gateway, identity, orders, inventory, payments, notifications and the web UI,
+# on top of the infrastructure in docker-compose.yml.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d --build
+#   open http://localhost:8081      (UI)   ·   http://localhost:5100/health/ready (gateway)
+#
+# Only the gateway (5100) and the UI (8081) are published; the services talk to each other on the internal network.
+# Needs roughly 6 GB of memory for Docker (SQL Server alone takes ~2 GB).
+# Demo setup: services run with ASPNETCORE_ENVIRONMENT=Development because that is what creates the databases and seeds the
+# demo accounts and products on first start. A real deployment would run migrations as a separate step and set its own secrets.
+name: orderflow
+
+x-service-environment: &service-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  Telemetry__Enabled: "${TELEMETRY_ENABLED:-false}" # true when the observability stack is also running
+  Telemetry__OtlpEndpoint: http://otel-collector:4317
+  Seq__Url: http://seq:80
+  Jwt__SigningKey: "${JWT_SIGNING_KEY:-dev-only-signing-key-change-me-0123456789abcdef}"
+  RabbitMq__Host: rabbitmq
+  RabbitMq__Username: "${RABBITMQ_USER}"
+  RabbitMq__Password: "${RABBITMQ_PASSWORD}"
+  ConnectionStrings__Redis: redis:6379
+
+x-dotnet-service: &dotnet-service
+  restart: unless-stopped
+  depends_on:
+    sqlserver: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  identity:
+    <<: *dotnet-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+      args:
+        PROJECT: src/Services/Identity/OrderFlow.Identity.Api/OrderFlow.Identity.Api.csproj
+        ENTRY_DLL: OrderFlow.Identity.Api.dll
+    image: orderflow-identity:local
+    environment:
+      <<: *service-environment
+      ConnectionStrings__IdentityDb: "Server=sqlserver,1433;Database=OrderFlow_Identity;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
+
+  inventory:
+    <<: *dotnet-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+      args:
+        PROJECT: src/Services/Inventory/OrderFlow.Inventory.Api/OrderFlow.Inventory.Api.csproj
+        ENTRY_DLL: OrderFlow.Inventory.Api.dll
+    image: orderflow-inventory:local
+    environment:
+      <<: *service-environment
+      ConnectionStrings__InventoryDb: "Server=sqlserver,1433;Database=OrderFlow_Inventory;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
+
+  payments:
+    <<: *dotnet-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+      args:
+        PROJECT: src/Services/Payments/OrderFlow.Payments.Api/OrderFlow.Payments.Api.csproj
+        ENTRY_DLL: OrderFlow.Payments.Api.dll
+    image: orderflow-payments:local
+    environment:
+      <<: *service-environment
+      ConnectionStrings__PaymentsDb: "Server=sqlserver,1433;Database=OrderFlow_Payments;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
+      # The fake payment gateway: set both to 0.1 to watch declines and outages trigger compensation.
+      FakePaymentGateway__DeclineRate: "${PAYMENT_DECLINE_RATE:-0}"
+      FakePaymentGateway__TransientFailureRate: "${PAYMENT_OUTAGE_RATE:-0}"
+
+  notifications:
+    <<: *dotnet-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+      args:
+        PROJECT: src/Services/Notifications/OrderFlow.Notifications/OrderFlow.Notifications.csproj
+        ENTRY_DLL: OrderFlow.Notifications.dll
+    image: orderflow-notifications:local
+    environment:
+      <<: *service-environment
+      ConnectionStrings__NotificationsDb: "Server=sqlserver,1433;Database=OrderFlow_Notifications;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
+
+  orders:
+    <<: *dotnet-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+      args:
+        PROJECT: src/Services/Orders/OrderFlow.Orders.Api/OrderFlow.Orders.Api.csproj
+        ENTRY_DLL: OrderFlow.Orders.Api.dll
+    image: orderflow-orders:local
+    environment:
+      <<: *service-environment
+      ConnectionStrings__OrdersDb: "Server=sqlserver,1433;Database=OrderFlow_Orders;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
+      Services__Inventory__BaseUrl: http://inventory:8080
+      RabbitMq__ManagementUrl: http://rabbitmq:15672
+
+  gateway:
+    <<: *dotnet-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+      args:
+        PROJECT: src/Services/Gateway/OrderFlow.Gateway/OrderFlow.Gateway.csproj
+        ENTRY_DLL: OrderFlow.Gateway.dll
+    image: orderflow-gateway:local
+    ports: ["5100:8080"]
+    environment:
+      <<: *service-environment
+      Cors__AllowedOrigins__0: http://localhost:8081
+      ReverseProxy__Clusters__identity__Destinations__d1__Address: http://identity:8080/
+      ReverseProxy__Clusters__orders__Destinations__d1__Address: http://orders:8080/
+      ReverseProxy__Clusters__inventory__Destinations__d1__Address: http://inventory:8080/
+      ReverseProxy__Clusters__payments__Destinations__d1__Address: http://payments:8080/
+      ReverseProxy__Clusters__notifications__Destinations__d1__Address: http://notifications:8080/
+    depends_on:
+      sqlserver: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      identity: { condition: service_started }
+      orders: { condition: service_started }
+      inventory: { condition: service_started }
+      payments: { condition: service_started }
+      notifications: { condition: service_started }
+
+  web:
+    build:
+      context: ../web
+      args:
+        VITE_API_URL: http://localhost:5100
+    image: orderflow-web:local
+    restart: unless-stopped
+    ports: ["8081:80"]
+    depends_on: [gateway]

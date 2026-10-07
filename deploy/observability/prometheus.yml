@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: otel-collector        # all .NET service metrics arrive through here
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: rabbitmq              # queue depths, including the *_error dead-letter queues
+    metrics_path: /metrics/detailed
+    params:
+      family: ["queue_coarse_metrics", "queue_metrics"]
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  - job_name: rabbitmq-overview
+    static_configs:
+      - targets: ["rabbitmq:15692"]
