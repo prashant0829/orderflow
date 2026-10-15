@@ -95,11 +95,24 @@ export interface Payment {
   orderId: string
   customerId: string
   amount: number
-  status: 'Completed' | 'Failed' | 'Refunded'
+  status: PaymentStatus
   transactionId: string | null
+  providerPaymentId: string | null
   failureReason: string | null
   createdAtUtc: string
   updatedAtUtc: string
+}
+
+export type PaymentStatus = 'AwaitingCustomer' | 'Completed' | 'Failed' | 'Refunded' | 'Cancelled'
+
+/** What the order page needs to take the customer's payment. The secret only exists while the customer still has to pay. */
+export interface Checkout {
+  status: PaymentStatus
+  amount: number
+  provider: string | null
+  publishableKey: string | null
+  clientSecret: string | null
+  currency: string | null
 }
 
 export interface DeadLetterQueue {

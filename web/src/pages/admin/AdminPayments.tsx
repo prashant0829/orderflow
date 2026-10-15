@@ -4,7 +4,7 @@ import type { Payment } from '../../api/types'
 import { Badge, Card, EmptyState, ErrorState, Skeleton } from '../../components/ui/primitives'
 import { formatDateTime, formatMoney, shortId } from '../../lib/format'
 
-const tone = { Completed: 'success', Failed: 'danger', Refunded: 'warning' } as const
+const tone = { Completed: 'success', Failed: 'danger', Refunded: 'warning', AwaitingCustomer: 'info', Cancelled: 'neutral' } as const
 
 export function paymentSummary(payments: Payment[]) {
   const completed = payments.filter((payment) => payment.status === 'Completed')
@@ -61,8 +61,8 @@ export function AdminPayments() {
                 <td className="px-4 py-3">
                   <Badge tone={tone[payment.status]}>{payment.status}</Badge>
                 </td>
-                <td className="max-w-64 truncate px-4 py-3 text-muted" title={payment.transactionId ?? payment.failureReason ?? ''}>
-                  {payment.transactionId ?? payment.failureReason ?? '–'}
+                <td className="max-w-64 truncate px-4 py-3 text-muted" title={payment.transactionId ?? payment.providerPaymentId ?? payment.failureReason ?? ''}>
+                  {payment.transactionId ?? payment.providerPaymentId ?? payment.failureReason ?? '–'}
                 </td>
               </tr>
             ))}

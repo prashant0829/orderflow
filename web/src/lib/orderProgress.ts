@@ -11,7 +11,7 @@ export interface Step {
 export const STEPS: Step[] = [
   { key: 'received', label: 'Order received', hint: 'We have your order' },
   { key: 'stock', label: 'Items reserved', hint: 'Checking and holding your items' },
-  { key: 'payment', label: 'Payment', hint: 'Charging your payment' },
+  { key: 'payment', label: 'Payment', hint: 'Taking your payment' },
   { key: 'done', label: 'Confirmed', hint: 'All set' },
 ]
 

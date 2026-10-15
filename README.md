@@ -30,7 +30,7 @@ A small shop (catalog, cart, checkout, order tracking, admin console) built as s
 - **Nothing is lost, nothing is done twice:** transactional outbox, inbox, idempotent consumers, retries, dead-letter queues you can replay from the UI.
 - **Live UI:** the order page updates by itself over SignalR, with a polling safety net.
 - **Observable:** one trace per order across every service and the message broker, business metrics, a Grafana dashboard, alerts.
-- **Proven:** 169 automated tests including integration tests on real SQL Server / Redis / RabbitMQ containers, browser tests, and a load test that found (and fixed) a real bottleneck.
+- **Proven:** 229 automated tests including integration tests on real SQL Server / Redis / RabbitMQ containers, browser tests, and a load test that found (and fixed) a real bottleneck.
 
 ## See it
 
@@ -128,6 +128,7 @@ On `Failed` and `Cancelled` the saga **releases the stock and refunds the paymen
 | A customer double-clicks or the network retries | `Idempotency-Key` header: Redis fast path, SQL unique index as the safety net | 5 parallel requests with one key create exactly one order |
 | Two customers buy the last item | **Atomic conditional update** (`... WHERE Available >= @n`), products locked in id order | 10 customers race for 3 items: exactly 3 win, never oversold |
 | A payment provider is flaky | **Retry with backoff, circuit breaker, timeout** behind a decorator; failure becomes a compensated order | Unit tests for the resilience pipeline, circuit-open scenario |
+| Card payments finish later, outside our control | **Stripe PaymentIntent** (idempotency key per order); the order waits for the customer; result by **signed webhook** or a server-side re-check; a customer who pays after the order timed out is refunded automatically | 10 integration tests (webhook, bad signatures, late payment), requests checked against Stripe's API spec |
 | A step fails halfway across services | **Saga with compensation**, timeouts via delayed messages (survive restarts) | Slow-payment tests: timeout fails the order, the late payment is refunded |
 | A message keeps failing | Retries, **dead-letter queue**, admin screen to inspect and replay (publisher-confirmed, never loses the message) | Admin UI flow, `e2e` scripts |
 | Stolen refresh token | **Rotating refresh tokens with reuse detection** (reuse ends every session), hashed storage, account lockout, uniform login errors | Integration + security scripts |
@@ -147,7 +148,7 @@ The design trade-offs (why a saga and not 2PC, why an outbox, why atomic stock u
 | Messaging | RabbitMQ, MassTransit (state machine saga, EF outbox/inbox, delayed messages, retries, DLQ) |
 | Data | SQL Server 2022 (database per service), Redis (cache, idempotency, SignalR backplane, rate limiting) |
 | Edge and security | YARP gateway, JWT access tokens + rotating refresh tokens, roles, per-route policies, rate limiting |
-| Resilience | Polly 8 (retry, circuit breaker, timeout), HTTP resilience handler |
+| Payments | Stripe test mode (PaymentIntents, Stripe.js card form, signed webhooks) or a built-in fake gateway; Polly 8 retry, circuit breaker and timeout around either |
 | Real time | SignalR (+ Redis backplane) |
 | Frontend | React 19, TypeScript, Vite, Tailwind 4, TanStack Query, React Router, zustand |
 | Observability | OpenTelemetry, Jaeger, Prometheus, Grafana (dashboard + alert rules), Serilog + Seq, health checks (live/ready) |
@@ -165,6 +166,7 @@ docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d --build
 ```
 
 Open **http://localhost:8081**. Sign in with the demo buttons (or `customer@orderflow.local` / `Customer#12345`, `admin@orderflow.local` / `Admin#12345`).
+**Real card payments in Stripe's sandbox** (optional, free test keys): see [Stripe test mode](docs/RUNBOOK.md#stripe-test-mode-real-sandbox-payments). Without keys, payments are simulated.
 Add the monitoring stack (Grafana :3000, Jaeger :16686, Prometheus :9090) with `-f docker-compose.observability.yml` and `TELEMETRY_ENABLED=true`.
 
 **Developing** (services run on your machine, infrastructure in Docker):
@@ -182,10 +184,10 @@ scripts/dev-up.sh                # all services + the UI on http://localhost:517
 
 | Suite | Count | Run |
 |---|---|---|
-| .NET unit tests (domain, handlers, saga state machine, resilience, security) | 104 | `dotnet test --filter "FullyQualifiedName!~IntegrationTests"` |
-| Integration tests: the real services on real SQL Server, Redis, RabbitMQ (Testcontainers) | 16 | `dotnet test tests/OrderFlow.IntegrationTests` |
-| UI unit and component tests | 34 | `cd web && npm test` |
-| Browser tests against the full system | 15 | `cd web && npx playwright test` |
+| .NET unit tests (domain, handlers, saga state machine, resilience, security, Stripe gateway and webhooks) | 148 | `dotnet test --filter "FullyQualifiedName!~IntegrationTests"` |
+| Integration tests: the real services on real SQL Server, Redis, RabbitMQ (Testcontainers) | 26 | `dotnet test tests/OrderFlow.IntegrationTests` |
+| UI unit and component tests | 40 | `cd web && npm test` |
+| Browser tests against the full system (plus 3 opt-in tests with Stripe test cards) | 15 | `cd web && npx playwright test` |
 | Scenario scripts (saga, security, observability) and k6 load test | 4 + 1 | `scripts/e2e-*.sh`, `scripts/load-test.sh` |
 
 The build treats warnings as errors. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds, runs the suites above and builds all 7 Docker images.
@@ -209,11 +211,11 @@ docs/               architecture, runbook, performance
 
 ## Honest limits
 
-- **It is a demo.** Payments are simulated (a fake gateway with random failures), emails are stored instead of sent, and services run with the Development environment so they create their own databases and seed demo data.
+- **It is a demo.** Payments use Stripe's test mode or a fake gateway (never real money), emails are stored instead of sent, and services run with the Development environment so they create their own databases and seed demo data.
 - **The refresh token lives in `localStorage`**, which is the usual single-page-app compromise. Moving it to an httpOnly cookie behind one origin is the next hardening step.
 - **Load numbers come from a memory-starved 8 GB laptop** running everything at once, so they are lower bounds. At 15 orders per second the saga queue backs up (and drains with nothing lost); at 8 per second everything stays under a second ([details](docs/PERFORMANCE.md)).
 - **One hot product is one row.** A real flash sale would shard stock or reserve in Redis first.
-- Not done: Alertmanager routing, HTTPS and asymmetric JWT keys, Kubernetes manifests, a real payment provider.
+- Not done: Alertmanager routing, HTTPS and asymmetric JWT keys, Kubernetes manifests, live-mode payments (3-D Secure and refunds from the admin screen are the next steps).
 
 ## License
 

@@ -14,3 +14,9 @@ public sealed class SlowPaymentCollection : ICollectionFixture<SlowPaymentSystem
 {
     public const string Name = "slow-payment-system";
 }
+
+[CollectionDefinition(Name)]
+public sealed class CardPaymentCollection : ICollectionFixture<CardPaymentSystem>
+{
+    public const string Name = "card-payment-system";
+}

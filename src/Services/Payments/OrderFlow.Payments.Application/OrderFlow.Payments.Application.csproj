@@ -5,6 +5,7 @@
     <ProjectReference Include="..\..\..\BuildingBlocks\OrderFlow.SharedKernel\OrderFlow.SharedKernel.csproj" />
     <ProjectReference Include="..\..\..\BuildingBlocks\OrderFlow.Cqrs\OrderFlow.Cqrs.csproj" />
     <ProjectReference Include="..\..\..\BuildingBlocks\OrderFlow.Caching\OrderFlow.Caching.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\OrderFlow.Contracts\OrderFlow.Contracts.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

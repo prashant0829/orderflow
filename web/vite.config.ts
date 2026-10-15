@@ -11,5 +11,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // The Playwright browser specs in e2e/ are run by `npx playwright test`, not by Vitest.
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 })

@@ -12,13 +12,17 @@ public class ChargePaymentConsumer(ISender sender) : IConsumer<ChargePayment>
         var message = context.Message;
         var result = await sender.Send(new ChargePaymentCommand(message.OrderId, message.CustomerId, message.Amount), context.CancellationToken);
 
-        if (result.Success)
+        switch (result.Kind)
         {
-            await context.Publish(new PaymentCompleted(message.OrderId, result.TransactionId!));
-        }
-        else
-        {
-            await context.Publish(new PaymentFailed(message.OrderId, result.FailureReason ?? "Unknown reason."));
+            case ChargeResultKind.Succeeded:
+                await context.Publish(new PaymentCompleted(message.OrderId, result.TransactionId!));
+                break;
+
+            case ChargeResultKind.Failed:
+                await context.Publish(new PaymentFailed(message.OrderId, result.FailureReason ?? "Unknown reason."));
+                break;
+
+            // Pending: the customer still has to pay. Stripe's webhook (or a "check again") announces the result later.
         }
     }
 }

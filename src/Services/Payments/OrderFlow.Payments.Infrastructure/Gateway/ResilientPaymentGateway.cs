@@ -19,6 +19,15 @@ public class ResilientPaymentGateway(IPaymentGateway inner, ResiliencePipeline p
             return true;
         }, cancellationToken);
 
+    public Task<bool> CancelAsync(string providerPaymentId, CancellationToken cancellationToken) =>
+        ExecuteAsync("cancel", token => inner.CancelAsync(providerPaymentId, token), cancellationToken);
+
+    public Task<PaymentCheckout?> GetCheckoutAsync(string providerPaymentId, CancellationToken cancellationToken) =>
+        ExecuteAsync("checkout", token => inner.GetCheckoutAsync(providerPaymentId, token), cancellationToken);
+
+    public Task<ProviderPaymentState> GetStatusAsync(string providerPaymentId, CancellationToken cancellationToken) =>
+        ExecuteAsync("status", token => inner.GetStatusAsync(providerPaymentId, token), cancellationToken);
+
     private async Task<T> ExecuteAsync<T>(string operation, Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();

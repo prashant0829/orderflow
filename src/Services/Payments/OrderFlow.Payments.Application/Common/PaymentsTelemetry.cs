@@ -10,6 +10,7 @@ public static class PaymentsTelemetry
     public const string Declined = "declined";
     public const string GatewayUnavailable = "gateway_unavailable";
     public const string Duplicate = "duplicate";
+    public const string AwaitingCustomer = "awaiting_customer";
 
     private static readonly Meter Meter = new(MeterName);
 
@@ -22,7 +23,7 @@ public static class PaymentsTelemetry
     // so without this the first order of each kind would be missing from rate() and increase().
     static PaymentsTelemetry()
     {
-        foreach (var result in new[] { Completed, Declined, GatewayUnavailable, Duplicate })
+        foreach (var result in new[] { Completed, Declined, GatewayUnavailable, Duplicate, AwaitingCustomer })
         {
             Charges.Add(0, new KeyValuePair<string, object?>("result", result));
         }

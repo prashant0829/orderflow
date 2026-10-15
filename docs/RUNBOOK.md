@@ -158,3 +158,20 @@ docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d --build   
 - Options (set in `deploy/.env` or the shell): `PAYMENT_DECLINE_RATE`, `PAYMENT_OUTAGE_RATE` (try 0.1 to see compensation), `JWT_SIGNING_KEY`, `TELEMETRY_ENABLED=true` when the observability compose file is also used.
 - Stop: `make docker-down` (keeps data). Wipe data: add `-v` to `docker compose ... down`.
 - Regenerate README images: with the local stack running and payments slowed (`FakePaymentGateway__LatencyMs=2500`), `cd web && node capture-screenshots.mjs`, then build the GIF from `/tmp/frames`.
+
+## Stripe test mode (real sandbox payments)
+By default payments are simulated. To use Stripe's sandbox instead (a real card form, real PaymentIntents, no real money):
+1. Create a free Stripe account and stay in **test mode**. Copy the two keys from https://dashboard.stripe.com/test/apikeys: `pk_test_...` (publishable) and `sk_test_...` (secret).
+2. `cp .env.stripe.example .env.stripe` and fill in the two keys. The file is git-ignored; `scripts/dev-up.sh` loads it automatically (Docker: set `PAYMENT_PROVIDER=Stripe`, `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` in `deploy/.env`).
+3. Start as usual: `RateLimit__Auth__Limit=1000 scripts/dev-up.sh`. The Payments log says nothing special; check `.logs/OrderFlow.Payments.Api.log` if the service refuses to start (it fails fast when the provider is Stripe and the secret key is empty).
+4. Place an order. On the order page a **Pay for your order** card appears with Stripe's card form. Use `4242 4242 4242 4242`, any future date, any CVC. `4000 0000 0000 0002` is always declined (the order stays open so you can try another card). Cancelling the order cancels the payment at Stripe; an order nobody pays is cancelled after the saga timeout (`OrderSaga__PaymentTimeoutSeconds`, default 900).
+5. **Webhook (optional).** Out of the box the order page asks the server to re-check the payment right after you pay, so no webhook is needed locally. To exercise the real webhook path: install the Stripe CLI (`brew install stripe/stripe-cli/stripe`, `stripe login`), run `scripts/stripe-listen.sh`, put the `whsec_...` it prints in `.env.stripe` as `Stripe__WebhookSecret`, and restart `scripts/dev-up.sh`. In production you add `https://<your gateway>/api/v1/payments/webhooks/stripe` as a webhook endpoint in the Stripe dashboard (events `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`).
+6. See it at Stripe: https://dashboard.stripe.com/test/payments shows every PaymentIntent with the order id in its metadata. The admin Payments screen shows the same `pi_...` id as the reference.
+
+Without keys, to try the webhook path locally: `scripts/stripe-test-webhook.sh <pi_id> [event_type]` sends a correctly signed fake event (secret `whsec_localtest`, or set `STRIPE_WEBHOOK_SECRET`).
+
+Checks that need no Stripe account:
+- Requests are valid against Stripe's real API specification: `docker run -d --rm -p 12111:12111 stripe/stripe-mock`, then `STRIPE_MOCK_URL=http://localhost:12111 dotnet test tests/OrderFlow.Payments.UnitTests --filter StripeMockContractTests`.
+- Whole system against the mock: start the services with `Payments__Provider=Stripe Stripe__SecretKey=sk_test_mock Stripe__PublishableKey=pk_test_mock Stripe__ApiBase=http://localhost:12111 Stripe__WebhookSecret=whsec_localtest`. The order waits at Payment; confirm it with `scripts/stripe-test-webhook.sh`. (The card fields themselves only load with real keys, because Stripe's servers draw them.)
+- Browser tests that type test cards into Stripe's form: `cd web && E2E_STRIPE=1 npx playwright test e2e/stripe.spec.ts` (needs real test keys; written but not yet run against real Stripe).
+- Run the normal browser tests with the default Fake provider; they expect orders to confirm by themselves.

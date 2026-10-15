@@ -7,11 +7,24 @@ namespace OrderFlow.Payments.Application.Payments.Commands;
 
 public record ChargePaymentCommand(Guid OrderId, Guid CustomerId, decimal Amount) : IRequest<ChargePaymentResult>;
 
-public record ChargePaymentResult(bool Success, string? TransactionId, string? FailureReason)
+public enum ChargeResultKind
 {
-    public static ChargePaymentResult Succeeded(string transactionId) => new(true, transactionId, null);
+    Succeeded,
+    Failed,
 
-    public static ChargePaymentResult Failed(string reason) => new(false, null, reason);
+    /// <summary>The customer still has to pay. Nothing is announced yet; the result comes later.</summary>
+    Pending
+}
+
+public record ChargePaymentResult(ChargeResultKind Kind, string? TransactionId, string? FailureReason)
+{
+    public bool Success => Kind == ChargeResultKind.Succeeded;
+
+    public static ChargePaymentResult Succeeded(string transactionId) => new(ChargeResultKind.Succeeded, transactionId, null);
+
+    public static ChargePaymentResult Failed(string reason) => new(ChargeResultKind.Failed, null, reason);
+
+    public static ChargePaymentResult Pending() => new(ChargeResultKind.Pending, null, null);
 }
 
 /// <summary>
@@ -39,9 +52,12 @@ public class ChargePaymentCommandHandler(
         await paymentRepository.AddAsync(payment, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        PaymentsTelemetry.RecordCharge(payment.Status == PaymentStatus.Completed
-            ? PaymentsTelemetry.Completed
-            : payment.FailureReason == GatewayUnavailableReason ? PaymentsTelemetry.GatewayUnavailable : PaymentsTelemetry.Declined);
+        PaymentsTelemetry.RecordCharge(payment.Status switch
+        {
+            PaymentStatus.Completed => PaymentsTelemetry.Completed,
+            PaymentStatus.AwaitingCustomer => PaymentsTelemetry.AwaitingCustomer,
+            _ => payment.FailureReason == GatewayUnavailableReason ? PaymentsTelemetry.GatewayUnavailable : PaymentsTelemetry.Declined
+        });
         return ToResult(payment);
     }
 
@@ -51,9 +67,12 @@ public class ChargePaymentCommandHandler(
         {
             var charge = await gateway.ChargeAsync(command.OrderId, command.Amount, cancellationToken);
 
-            return charge.Approved
-                ? Payment.Completed(command.OrderId, command.CustomerId, command.Amount, charge.TransactionId!)
-                : Payment.Failed(command.OrderId, command.CustomerId, command.Amount, charge.DeclineReason ?? "Payment declined.");
+            return charge.Outcome switch
+            {
+                ChargeOutcome.Approved => Payment.Completed(command.OrderId, command.CustomerId, command.Amount, charge.TransactionId!),
+                ChargeOutcome.ActionRequired => Payment.AwaitingCustomer(command.OrderId, command.CustomerId, command.Amount, charge.TransactionId!),
+                _ => Payment.Failed(command.OrderId, command.CustomerId, command.Amount, charge.DeclineReason ?? "Payment declined.")
+            };
         }
         catch (PaymentGatewayUnavailableException)
         {
@@ -62,7 +81,10 @@ public class ChargePaymentCommandHandler(
         }
     }
 
-    private static ChargePaymentResult ToResult(Payment payment) => payment.Status == PaymentStatus.Completed
-        ? ChargePaymentResult.Succeeded(payment.TransactionId!)
-        : ChargePaymentResult.Failed(payment.FailureReason ?? $"Payment is {payment.Status}.");
+    private static ChargePaymentResult ToResult(Payment payment) => payment.Status switch
+    {
+        PaymentStatus.Completed => ChargePaymentResult.Succeeded(payment.TransactionId!),
+        PaymentStatus.AwaitingCustomer => ChargePaymentResult.Pending(),
+        _ => ChargePaymentResult.Failed(payment.FailureReason ?? $"Payment is {payment.Status}.")
+    };
 }

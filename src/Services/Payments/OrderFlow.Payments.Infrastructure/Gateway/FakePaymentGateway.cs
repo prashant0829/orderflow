@@ -22,6 +22,13 @@ public class FakePaymentGateway(IOptions<FakePaymentGatewayOptions> options) : I
     public Task RefundAsync(string transactionId, CancellationToken cancellationToken) =>
         SimulateNetworkAsync(amount: 0, cancellationToken);
 
+    // The fake gateway answers instantly, so no payment is ever left waiting for the customer.
+    public Task<bool> CancelAsync(string providerPaymentId, CancellationToken cancellationToken) => Task.FromResult(true);
+
+    public Task<PaymentCheckout?> GetCheckoutAsync(string providerPaymentId, CancellationToken cancellationToken) => Task.FromResult<PaymentCheckout?>(null);
+
+    public Task<ProviderPaymentState> GetStatusAsync(string providerPaymentId, CancellationToken cancellationToken) => Task.FromResult(ProviderPaymentState.Succeeded);
+
     private async Task SimulateNetworkAsync(decimal amount, CancellationToken cancellationToken)
     {
         await Task.Delay(_options.LatencyMs, cancellationToken);

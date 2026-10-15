@@ -12,6 +12,9 @@ public class PaymentRepository(PaymentsDbContext dbContext) : IPaymentRepository
     public Task<Payment?> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken) =>
         dbContext.Payments.FirstOrDefaultAsync(payment => payment.OrderId == orderId, cancellationToken);
 
+    public Task<Payment?> GetByProviderPaymentIdAsync(string providerPaymentId, CancellationToken cancellationToken) =>
+        dbContext.Payments.FirstOrDefaultAsync(payment => payment.ProviderPaymentId == providerPaymentId, cancellationToken);
+
     public async Task<IReadOnlyList<Payment>> ListRecentAsync(int count, CancellationToken cancellationToken) =>
         await dbContext.Payments.AsNoTracking().OrderByDescending(payment => payment.CreatedAtUtc).Take(count).ToListAsync(cancellationToken);
 }

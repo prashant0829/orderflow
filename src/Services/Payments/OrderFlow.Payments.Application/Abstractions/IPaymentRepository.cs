@@ -8,5 +8,7 @@ public interface IPaymentRepository
 
     Task<Payment?> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
 
+    Task<Payment?> GetByProviderPaymentIdAsync(string providerPaymentId, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<Payment>> ListRecentAsync(int count, CancellationToken cancellationToken);
 }

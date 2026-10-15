@@ -6,6 +6,8 @@ using DotNet.Testcontainers.Images;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using OrderFlow.Identity.Api.Controllers;
 using OrderFlow.Inventory.Api.Controllers;
 using OrderFlow.Notifications.Controllers;
@@ -13,6 +15,8 @@ using OrderFlow.Orders.Api.Controllers;
 using OrderFlow.Orders.Application.Abstractions;
 using OrderFlow.Orders.Infrastructure.Catalog;
 using OrderFlow.Payments.Api.Controllers;
+using OrderFlow.Payments.Application.Abstractions;
+using OrderFlow.Payments.Infrastructure.Gateway.Stripe;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
@@ -49,6 +53,11 @@ public class SystemFixture(SystemOptions options) : IAsyncLifetime
     public HttpClient Orders { get; private set; } = null!;
     public HttpClient Notifications { get; private set; } = null!;
 
+    /// <summary>Only set when <see cref="SystemOptions.CustomerPaysByCard"/> is on.</summary>
+    public CardGatewayDouble? CardGateway { get; private set; }
+
+    public const string CardWebhookSecret = "whsec_integration_test_secret";
+
     public string RabbitContainerId => _rabbit?.Id ?? throw new InvalidOperationException("RabbitMQ is not running.");
 
     public async Task InitializeAsync()
@@ -61,8 +70,9 @@ public class SystemFixture(SystemOptions options) : IAsyncLifetime
         Identity = _identity.CreateClient();
         _inventory = new WebApplicationFactory<StockController>();
         Inventory = _inventory.CreateClient();
-        _payments = new WebApplicationFactory<PaymentsController>();
+        _payments = options.CustomerPaysByCard ? CreateCardPaymentsFactory() : new WebApplicationFactory<PaymentsController>();
         Payments = _payments.CreateClient();
+        CardGateway = options.CustomerPaysByCard ? _payments.Services.GetRequiredService<CardGatewayDouble>() : null;
         _notifications = new WebApplicationFactory<NotificationsController>();
         Notifications = _notifications.CreateClient();
 
@@ -110,6 +120,17 @@ public class SystemFixture(SystemOptions options) : IAsyncLifetime
             }, TimeSpan.FromSeconds(180), $"{database} to be migrated");
         }
     }
+
+    /// <summary>Real Payments service, but the provider is a stand-in for Stripe and webhooks are verified with a known secret.</summary>
+    private static WebApplicationFactory<PaymentsController> CreateCardPaymentsFactory() =>
+        new WebApplicationFactory<PaymentsController>().WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IPaymentGateway>();
+            services.AddSingleton<CardGatewayDouble>();
+            services.AddSingleton<IPaymentGateway>(provider => provider.GetRequiredService<CardGatewayDouble>());
+            services.RemoveAll<IWebhookVerifier>();
+            services.AddSingleton<IWebhookVerifier>(_ => new StripeWebhookVerifier(Options.Create(new StripeOptions { WebhookSecret = CardWebhookSecret })));
+        }));
 
     public async Task DisposeAsync()
     {
@@ -199,3 +220,6 @@ public sealed class DefaultSystem() : SystemFixture(new SystemOptions());
 
 /// <summary>Payments take longer than the saga is willing to wait, to exercise timeouts and late-result compensation.</summary>
 public sealed class SlowPaymentSystem() : SystemFixture(new SystemOptions { PaymentLatencyMs = 3500, SagaPaymentTimeoutSeconds = 2 });
+
+/// <summary>The customer has to enter card details: the payment waits, and a 12 s saga timeout ends orders nobody pays for.</summary>
+public sealed class CardPaymentSystem() : SystemFixture(new SystemOptions { SagaPaymentTimeoutSeconds = 12, CustomerPaysByCard = true });

@@ -16,6 +16,10 @@ public class PaymentsUnitOfWork(PaymentsDbContext dbContext) : IUnitOfWork
         {
             return await dbContext.SaveChangesAsync(cancellationToken);
         }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            throw new ConflictException("The payment was changed by another request. Try again.", exception);
+        }
         catch (DbUpdateException exception) when (exception.InnerException is SqlException { Number: SqlUniqueIndexViolation or SqlUniqueConstraintViolation })
         {
             throw new ConflictException("A payment for this order already exists.", exception);

@@ -3,6 +3,11 @@
 # Extra env vars are passed through, e.g.:  OrderSaga__PaymentTimeoutSeconds=3 scripts/dev-up.sh
 cd "$(dirname "$0")/.."
 mkdir -p .logs
+# Optional Stripe test keys (see .env.stripe.example). Exported so every service started below inherits them.
+if [ -f .env.stripe ]; then
+  set -a; . ./.env.stripe; set +a
+  echo "Stripe test mode: using keys from .env.stripe"
+fi
 scripts/dev-down.sh >/dev/null 2>&1
 for svc in "Identity/OrderFlow.Identity.Api" "Inventory/OrderFlow.Inventory.Api" "Payments/OrderFlow.Payments.Api" "Orders/OrderFlow.Orders.Api" "Notifications/OrderFlow.Notifications" "Gateway/OrderFlow.Gateway"; do
   name=$(basename "$svc")

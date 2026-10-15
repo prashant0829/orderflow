@@ -70,6 +70,11 @@ services:
       # The fake payment gateway: set both to 0.1 to watch declines and outages trigger compensation.
       FakePaymentGateway__DeclineRate: "${PAYMENT_DECLINE_RATE:-0}"
       FakePaymentGateway__TransientFailureRate: "${PAYMENT_OUTAGE_RATE:-0}"
+      # PAYMENT_PROVIDER=Stripe switches to Stripe's test mode (keys from https://dashboard.stripe.com/test/apikeys).
+      Payments__Provider: "${PAYMENT_PROVIDER:-Fake}"
+      Stripe__SecretKey: "${STRIPE_SECRET_KEY:-}"
+      Stripe__PublishableKey: "${STRIPE_PUBLISHABLE_KEY:-}"
+      Stripe__WebhookSecret: "${STRIPE_WEBHOOK_SECRET:-}"
 
   notifications:
     <<: *dotnet-service
@@ -97,6 +102,7 @@ services:
       <<: *service-environment
       ConnectionStrings__OrdersDb: "Server=sqlserver,1433;Database=OrderFlow_Orders;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
       Services__Inventory__BaseUrl: http://inventory:8080
+      OrderSaga__PaymentTimeoutSeconds: "${PAYMENT_TIMEOUT_SECONDS:-900}"
       RabbitMq__ManagementUrl: http://rabbitmq:15672
 
   gateway:

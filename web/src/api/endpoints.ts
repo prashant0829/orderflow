@@ -2,6 +2,7 @@ import { request, storeSession } from './client'
 import { setAccessToken, setRefreshToken } from './tokens'
 import type {
   AppNotification,
+  Checkout,
   AuthResult,
   DeadLetterMessage,
   DeadLetterQueue,
@@ -62,6 +63,13 @@ export const ordersApi = {
 export const notificationsApi = {
   list: (count = 50) => request<AppNotification[]>(`${v1}/notifications?count=${count}`),
   timeline: (orderId: string) => request<TimelineEntry[]>(`${v1}/timeline/${orderId}`),
+}
+
+export const paymentsApi = {
+  /** 404 for a moment after the order is placed, until the payment has been created: callers keep asking. */
+  checkout: (orderId: string) => request<Checkout>(`${v1}/payments/order/${orderId}/checkout`),
+  /** Asks the server to re-check the payment with the provider. Used right after paying, so the page never depends on a webhook. */
+  refresh: (orderId: string) => request<Checkout>(`${v1}/payments/order/${orderId}/refresh`, { method: 'POST' }),
 }
 
 export const adminApi = {

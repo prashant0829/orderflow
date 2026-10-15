@@ -8,6 +8,7 @@ import { ApiError } from '../api/client'
 import { ConnectionIndicator } from '../components/layout/ConnectionIndicator'
 import { OrderStepper } from '../components/orders/OrderStepper'
 import { OrderTimeline } from '../components/orders/OrderTimeline'
+import { PaymentSection } from '../components/payment/PaymentSection'
 import { StatusBadge } from '../components/orders/StatusBadge'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -109,6 +110,8 @@ export function OrderDetailPage() {
       <Card className="p-6">
         <OrderStepper state={state} timeline={entries} />
       </Card>
+
+      <PaymentSection orderId={data.id} active={state === 'AwaitingPayment' && data.status === 'Pending'} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="p-6 lg:col-span-3">
